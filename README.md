@@ -1,2 +1,2 @@
-# ebmr_py
+# ebmrPy
 Empirical Bayes Multiple Regression
