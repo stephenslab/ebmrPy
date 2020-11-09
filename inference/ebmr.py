@@ -2,6 +2,7 @@ import numpy as np
 from scipy import linalg as sc_linalg
 
 from inference import f_elbo
+from utils import log_density
 
 class EBMR:
 
@@ -107,7 +108,7 @@ class EBMR:
                 self.update_elbo()
 
             self._elbo_path[itn] = self._elbo
-            self._loglik_path[itn] = 0.
+            self._loglik_path[itn] = self.grr_loglik()
             self._n_iter += 1
             if self._elbo - elbo < self.tol: break
             elbo = self._elbo
@@ -151,6 +152,12 @@ class EBMR:
                                       self._XTX, 
                                       ElogW, KLW)
         return
+
+
+    def grr_loglik(self):
+        sigma_y = self._s2 * (np.eye(self.n_samples) + self._sb2 * np.dot(self.X, np.dot(np.diag(self._Wbar), self.X.T)))
+        loglik  = log_density.mgauss(self.y.reshape(-1, 1), np.zeros((self.n_samples, 1)), sigma_y)
+        return loglik
 
 
     # invert a square matrix using Cholesky

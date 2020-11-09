@@ -12,7 +12,8 @@ def standardize(X):
     return Xstd
 
 
-def ridge_data(nsample, nvar, errsigma):
+def ridge_data(nsample, nvar, errsigma, seed=200):
+    np.random.seed(seed)
     X = np.random.normal(0, 1, nsample * nvar).reshape(nsample, nvar)
     X = standardize(X)
     btrue = np.random.normal(0, 1, nvar)
@@ -30,13 +31,16 @@ class TestEBMR (unittest.TestCase):
         sd = 1.0
         X, y, btrue = ridge_data(n, p, sd)
 
-        m_em   = Ridge(solver='em', max_iter = 1000)
+        m_em   = Ridge(solver='em', max_iter = 100)
         m_em.fit(X, y)
 
-        m_ebmr = Ridge(solver='ebmr', tol=1e-4)
+        m_ebmr = Ridge(solver='ebmr', tol=1e-4, max_iter=1000)
         m_ebmr.fit(X, y)
 
-        self.assertTrue(np.allclose(m_em.coef_, m_ebmr.coef_, rtol=1e-02, atol=1e-02))
+        self.assertAlmostEqual(m_em.updates_['loglik'][-1], 
+                               m_ebmr.updates_['loglik'][-1],
+                               places=2)
+
 
 if __name__ == '__main__':
     unittest.main()

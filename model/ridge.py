@@ -28,7 +28,7 @@ def ridge_regression(X, y,
                           max_iter = max_iter, tol = tol)
         ebmr_ridge.update()
         b_postmean = ebmr_ridge.mu
-        b_postvar  = ebmr_ridge.sigma
+        b_postvar  = ebmr_ridge.s2 * ebmr_ridge.sigma
         s2 = ebmr_ridge.s2
         sb2 = ebmr_ridge.sb2
         updates = {'loglik': ebmr_ridge.loglik_path,
