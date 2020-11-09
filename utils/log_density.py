@@ -1,6 +1,6 @@
 import numpy as np
 
-def mgauss(x, u, cov):
+def mgauss(x, mu, cov):
     '''
     Caculate the multivariate normal density (pdf)
 
@@ -14,6 +14,7 @@ def mgauss(x, u, cov):
     assert(cov.shape[0] == cov.shape[1]), 'covariance matrix must be square'
     assert(mu.shape[0] == cov.shape[0]), 'cov_mat and mu_vec must have the same dimensions'
     assert(mu.shape[0] == x.shape[0]), 'mu and x must have the same dimensions'
+    nsample = x.shape[0]
     part1 = - nsample * 0.5 * np.log(2. * np.pi) - 0.5 * np.linalg.slogdet(cov)[1]
     xlm = x - mu
     part2 =  - 0.5 * np.dot(xlm.T, np.dot(np.linalg.inv(cov), xlm))

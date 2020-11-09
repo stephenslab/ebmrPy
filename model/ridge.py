@@ -3,7 +3,6 @@ Ridge regression
 """
 
 import numpy as np
-from utils.logs import MyLogger
 
 from inference.ebmr import EBMR
 from inference import penalized_em
@@ -12,6 +11,7 @@ def ridge_regression(X, y,
                      s2_init, sb2_init,
                      max_iter,
                      tol=1e-3,
+                     solver='ebmr'
                     ):
 
     n_samples, n_features = X.shape
@@ -23,6 +23,7 @@ def ridge_regression(X, y,
     elif solver == 'ebmr':
         ebmr_ridge = EBMR(X, y, 
                           prior = 'ridge',
+                          model = 'full',
                           s2_init = s2_init, sb2_init = sb2_init,
                           max_iter = max_iter, tol = tol)
         ebmr_ridge.update()
@@ -41,7 +42,7 @@ class Ridge:
 
     def __init__(self,
                  normalize=False,
-                 max_iter=None, tol=1e-3, solver="auto",
+                 max_iter=1000, tol=1e-4, solver="auto",
                  s2_init=1.0, sb2_init=1.0,
                  random_state=None):
         # Initial values
@@ -49,6 +50,7 @@ class Ridge:
         self.max_iter = max_iter
         self.tol = tol
         self.solver = solver
+        if self.solver == 'auto': self.solver = 'ebmr'
         self.s2_init = s2_init
         self.sb2_init = sb2_init
         self.random_state = random_state
@@ -67,7 +69,7 @@ class Ridge:
                                                     self.s2_init, self.sb2_init,
                                                     max_iter=self.max_iter, 
                                                     tol=self.tol, 
-                                                    solver=self.solver,
+                                                    solver=self.solver
                                                     )
         self.coef_ = self.bmean_.copy()
         return self

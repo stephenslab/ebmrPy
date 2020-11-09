@@ -8,14 +8,15 @@ class EBMR:
     def __init__(self,
                 X, y, 
                 prior='ridge',
+                model='full',
                 s2_init=1.0, sb2_init=1.0, 
                 max_iter=100, tol=1e-4):
         self.X = X
         self.y = y
         self.prior = prior
+        self.model = model
         self.max_iter = max_iter
         self.tol = tol
-        self.g = g
         self.n_samples, self.n_features = X.shape
 
         # Initialize other internal variables
@@ -81,9 +82,11 @@ class EBMR:
 
     def update(self):
 
+        #ipdb.set_trace()
+
         # Precalculate SVD, X'X, X'y
         self.svd = sc_linalg.svd(self.X)
-        self._XTX = svd2XTX(self.svd)
+        self._XTX = self.svd2XTX(self.svd)
         self._XTy = np.dot(self.X.T, self.y)
 
 
@@ -94,14 +97,14 @@ class EBMR:
 
             # GRR Step
             if self.model == 'full':
-                update_sigma_direct()
-                update_mu_direct()
+                self.update_sigma_direct()
+                self.update_mu_direct()
 
             # EBNV Step
             if self.model == 'full':
-                update_s2()
-                update_ebnv()
-                update_elbo()
+                self.update_s2()
+                self.update_ebnv()
+                self.update_elbo()
 
             self._elbo_path[itn] = self._elbo
             self._loglik_path[itn] = 0.
@@ -113,17 +116,17 @@ class EBMR:
 
 
     def update_sigma_direct(self):
-        self._sigma = cho_inverse(self._XTX + np.diag(1 / self._Wbar))
+        self._sigma = self.cho_inverse(self._XTX + np.diag(1 / self._Wbar))
         return
 
 
-    def update_mu(self):
+    def update_mu_direct(self):
         self._mu = np.dot(self._sigma, self._XTy)
         return
 
 
     def update_s2(self):
-        A = np.sum(np.square(self.Y - np.dot(self.X, self._mu)))
+        A = np.sum(np.square(self.y - np.dot(self.X, self._mu)))
         self._s2 = (A + np.sum(np.square(self._mu) / self._Wbar)) / self.n_samples
         return
 

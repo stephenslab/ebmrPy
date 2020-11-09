@@ -1,6 +1,6 @@
 import numpy as np
 
-def parametric(X, y, s2, sb2, mu, sigma, Wbar, XTX, ElogW, KLW):
+def parametric(X, y, s2, sb2, mu, sigma, Wbar, XTX, ElogW, KLw):
     n, p = X.shape
     elbo = c_func(n, s2, ElogW) \
            + h1_func(X, y, s2, mu, Wbar) \
@@ -15,7 +15,7 @@ def c_func(n, s2, ElogW):
     return val
 
 def h1_func(X, y, s2, mu, Wbar):
-    val = - (0.5 / s2) * (np.sum(np.square(Y - np.dot(X, mu))) \
+    val = - (0.5 / s2) * (np.sum(np.square(y - np.dot(X, mu))) \
                           + np.sum(np.square(mu) / Wbar))
     return val
 
