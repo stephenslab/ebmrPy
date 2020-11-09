@@ -42,5 +42,28 @@ class TestEBMR (unittest.TestCase):
                                places=2)
 
 
+    def _sigma_ebmr_variant(self, variant1, variant2):
+        n = 50
+        p = 100
+        sd = 1.0
+        X, y, btrue = ridge_data(n, p, sd)
+
+        m1 = Ridge(solver='ebmr', variant=variant1)
+        m1.fit(X, y)
+
+        m2 = Ridge(solver='ebmr', variant=variant2)
+        m2.fit(X, y)
+
+        self.assertTrue(np.allclose(m1.bvar_, m2.bvar_))
+
+
+    def test_woodbury_full(self):
+        self._sigma_ebmr_variant('full', 'woodbury_full')
+
+
+    def test_woodbury_svd_full(self):
+        self._sigma_ebmr_variant('woodbury_full', 'woodbury_svd_full')
+
+
 if __name__ == '__main__':
     unittest.main()

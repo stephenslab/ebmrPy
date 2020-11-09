@@ -6,24 +6,36 @@ import numpy as np
 
 from inference.ebmr import EBMR
 from inference import penalized_em
+from utils.logs import MyLogger
+
+logger = MyLogger(__name__)
 
 def ridge_regression(X, y,
                      s2_init, sb2_init,
                      max_iter,
                      tol=1e-3,
-                     solver='ebmr'
+                     solver='ebmr',
+                     variant='full'
                     ):
 
     n_samples, n_features = X.shape
+
+    logger.debug("Using {:s} solver".format(solver))
 
     if solver == 'em':
         s2, sb2, b_postmean, b_postvar, loglik, n_iter = penalized_em.ridge(X, y, s2_init, sb2_init, max_iter)
         updates = {'loglik': loglik}
 
     elif solver == 'ebmr':
+        #if variant == 'full':
+        #    model = 'full'
+        #elif variant == 'woodbury_full':
+        #    model = 'woodbury_full'
+        #elif variant == 'woodbury_svd_full':
+        #    model = 'woodbury_svd_full'
         ebmr_ridge = EBMR(X, y, 
                           prior = 'ridge',
-                          model = 'full',
+                          model = variant,
                           s2_init = s2_init, sb2_init = sb2_init,
                           max_iter = max_iter, tol = tol)
         ebmr_ridge.update()
@@ -42,7 +54,8 @@ class Ridge:
 
     def __init__(self,
                  normalize=False,
-                 max_iter=1000, tol=1e-4, solver="auto",
+                 max_iter=1000, tol=1e-4, solver='auto',
+                 variant='full',
                  s2_init=1.0, sb2_init=1.0,
                  random_state=None):
         # Initial values
@@ -51,6 +64,7 @@ class Ridge:
         self.tol = tol
         self.solver = solver
         if self.solver == 'auto': self.solver = 'ebmr'
+        self.variant = variant
         self.s2_init = s2_init
         self.sb2_init = sb2_init
         self.random_state = random_state
@@ -63,13 +77,18 @@ class Ridge:
         self.updates_ = dict()
         self.n_iter_ = 0
 
+        # Logging
+        self.logger = MyLogger(__name__)
+
+
     def fit(self, X, y):
         self.bmean_, self.bvar_, self.s2_, _, \
         self.updates_, self.n_iter_ = ridge_regression(X, y,
                                                     self.s2_init, self.sb2_init,
                                                     max_iter=self.max_iter, 
                                                     tol=self.tol, 
-                                                    solver=self.solver
+                                                    solver=self.solver,
+                                                    variant=self.variant
                                                     )
         self.coef_ = self.bmean_.copy()
         return self

@@ -3,6 +3,7 @@ from scipy import linalg as sc_linalg
 
 from inference import f_elbo
 from utils import log_density
+from utils.logs import MyLogger
 
 class EBMR:
 
@@ -32,9 +33,14 @@ class EBMR:
         self._n_iter = 0
 
         # Other variables which will be initialized after the 'update' call
-        # self.svd
+        # self._svd
         # self._XTy
         # self._XTX
+        # self._Dinit
+
+        # Logging
+        self.logger = MyLogger(__name__)
+        self.logger.debug('EBMR using {:s}'.format(self.model))
 
 
     @property
@@ -86,9 +92,10 @@ class EBMR:
         #ipdb.set_trace()
 
         # Precalculate SVD, X'X, X'y
-        self.svd = sc_linalg.svd(self.X)
-        self._XTX = self.svd2XTX(self.svd)
+        self._svd = sc_linalg.svd(self.X, full_matrices=False)
+        self._XTX = self.svd2XTX(self._svd)
         self._XTy = np.dot(self.X.T, self.y)
+        self._Dinit = np.diag(self._XTX)
 
 
         # EBMR iteration
@@ -101,11 +108,19 @@ class EBMR:
                 self.update_sigma_direct()
                 self.update_mu_direct()
 
+            elif self.model == 'woodbury_full':
+                self.update_sigma_woodbury()
+                self.update_mu_direct()
+
+            elif self.model == 'woodbury_svd_full':
+                self.update_sigma_woodbury_svd()
+                self.update_mu_direct()
+
             # EBNV Step
-            if self.model == 'full':
-                self.update_s2()
-                self.update_ebnv()
-                self.update_elbo()
+            #if self.model == 'full':
+            self.update_s2()
+            self.update_ebnv()
+            self.update_elbo()
 
             self._elbo_path[itn] = self._elbo
             self._loglik_path[itn] = self.grr_loglik()
@@ -118,6 +133,26 @@ class EBMR:
 
     def update_sigma_direct(self):
         self._sigma = self.cho_inverse(self._XTX + np.diag(1 / self._Wbar))
+        return
+
+
+    def update_sigma_woodbury(self):
+        Hinv = self.cho_inverse(np.eye(self.n_samples) + np.linalg.multi_dot([self.X, np.diag(self._Wbar), self.X.T]))
+        self._sigma = np.diag(self._Wbar) \
+                      - np.linalg.multi_dot([np.diag(self._Wbar), self.X.T, Hinv, self.X, np.diag(self._Wbar)])
+        return
+
+
+    def update_sigma_woodbury_svd(self, k = None):
+        U, S, Vh = self._svd
+        if k is None:
+            k = max(S.shape[0], Vh.shape[0])
+        L = np.dot(np.diag(S[:k]), Vh[:k, :])
+        D = self._Dinit - np.sum(np.square(L), axis = 0)
+        A = D + (1 / self._Wbar)
+        Ainv = 1 / A
+        Hinv = self.cho_inverse(np.eye(self.n_samples) + np.linalg.multi_dot([L, np.diag(Ainv), L.T]))
+        self._sigma = np.diag(Ainv) - np.linalg.multi_dot([np.diag(Ainv), L.T, Hinv, L, np.diag(Ainv)])
         return
 
 
