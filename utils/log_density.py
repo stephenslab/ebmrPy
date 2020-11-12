@@ -19,3 +19,11 @@ def mgauss(x, mu, cov):
     xlm = x - mu
     part2 =  - 0.5 * np.dot(xlm.T, np.dot(np.linalg.inv(cov), xlm))
     return float(part1 + part2)
+
+def mgauss_diagcov(x, mu, diagcov):
+    nsample = x.shape[0]
+    logdet = np.sum(np.log(diagcov))
+    part1 = - nsample * 0.5 * np.log(2. * np.pi) - 0.5 * logdet
+    xlm = x - mu
+    part2 = - 0.5 * np.sum(np.square(xlm) / diagcov)
+    return float(part1 + part2)

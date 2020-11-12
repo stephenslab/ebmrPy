@@ -3,6 +3,7 @@ Ridge regression
 """
 
 import numpy as np
+from scipy import linalg as sc_linalg
 
 from inference.ebmr import EBMR
 from inference import penalized_em
@@ -15,7 +16,8 @@ def ridge_regression(X, y,
                      max_iter,
                      tol=1e-3,
                      solver='ebmr',
-                     variant='full'
+                     variant='full',
+                     fast_k = None
                     ):
 
     n_samples, n_features = X.shape
@@ -25,6 +27,25 @@ def ridge_regression(X, y,
     if solver == 'em':
         s2, sb2, b_postmean, b_postvar, loglik, n_iter = penalized_em.ridge(X, y, s2_init, sb2_init, max_iter)
         updates = {'loglik': loglik}
+
+
+    elif solver == 'em_svd':
+        U, D, Vh = sc_linalg.svd(X, full_matrices=False)
+        Xtilde = np.dot(np.diag(D), Vh)
+        ytilde = np.dot(U.T, y)
+        d2 = np.square(D)
+        s2, sb2, l2, loglik, n_iter = \
+            penalized_em.ridge_svd(ytilde, d2,
+                                  s2_init = s2_init, sb2_init = sb2_init, 
+                                  tol=tol,
+                                  max_iter=max_iter)
+        updates = {'loglik': loglik}
+        XTXtilde = np.dot(Xtilde.T, Xtilde)
+        XTy = np.dot(X.T, y)
+        b_postvar = np.linalg.inv((np.eye(n_features) / sb2) + (XTXtilde / s2))
+        b_postmean = np.dot(b_postvar, XTy) / s2
+        print(n_iter)
+                                                                               
 
     elif solver == 'ebmr':
         #if variant == 'full':
@@ -36,6 +57,7 @@ def ridge_regression(X, y,
         ebmr_ridge = EBMR(X, y, 
                           prior = 'ridge',
                           model = variant,
+                          k = fast_k,
                           s2_init = s2_init, sb2_init = sb2_init,
                           max_iter = max_iter, tol = tol)
         ebmr_ridge.update()
@@ -56,6 +78,7 @@ class Ridge:
                  normalize=False,
                  max_iter=1000, tol=1e-4, solver='auto',
                  variant='full',
+                 fast_k=None,
                  s2_init=1.0, sb2_init=1.0,
                  random_state=None):
         # Initial values
@@ -65,6 +88,7 @@ class Ridge:
         self.solver = solver
         if self.solver == 'auto': self.solver = 'ebmr'
         self.variant = variant
+        self.fast_k = fast_k
         self.s2_init = s2_init
         self.sb2_init = sb2_init
         self.random_state = random_state
@@ -88,7 +112,8 @@ class Ridge:
                                                     max_iter=self.max_iter, 
                                                     tol=self.tol, 
                                                     solver=self.solver,
-                                                    variant=self.variant
+                                                    variant=self.variant,
+                                                    fast_k=self.fast_k
                                                     )
         self.coef_ = self.bmean_.copy()
         return self

@@ -2,6 +2,7 @@ import numpy as np
 from scipy import linalg as sc_linalg
 
 from inference import f_elbo
+from inference import penalized_em
 from utils import log_density
 from utils.logs import MyLogger
 
@@ -11,6 +12,7 @@ class EBMR:
                 X, y, 
                 prior='ridge',
                 model='full',
+                k = None, # used for fast Woodbury via svd
                 s2_init=1.0, sb2_init=1.0, 
                 max_iter=100, tol=1e-4):
         self.X = X
@@ -20,6 +22,7 @@ class EBMR:
         self.max_iter = max_iter
         self.tol = tol
         self.n_samples, self.n_features = X.shape
+        self.k = k
 
         # Initialize other internal variables
         self._s2 = s2_init
@@ -116,14 +119,24 @@ class EBMR:
                 self.update_sigma_woodbury_svd()
                 self.update_mu_direct()
 
+            elif self.model == 'woodbury_svd_fast':
+                self.update_sigma_woodbury_svd(k = self.k)
+                self.update_mu_direct()
+
+            elif self.model == 'ebrr_svd':
+                self.ebrr_svd()
+                self.update_sigma_woodbury_svd(k = self.k)
+                self.update_mu_direct()
+                
+
             # EBNV Step
-            #if self.model == 'full':
-            self.update_s2()
+            if self.model != 'ebrr_svd':
+                self.update_s2()
             self.update_ebnv()
             self.update_elbo()
 
             self._elbo_path[itn] = self._elbo
-            self._loglik_path[itn] = self.grr_loglik()
+            self._loglik_path[itn] = self.grr_logmarglik()
             self._n_iter += 1
             if self._elbo - elbo < self.tol: break
             elbo = self._elbo
@@ -131,28 +144,60 @@ class EBMR:
         return
 
 
+    def ebrr_svd(self):
+        Xtilde = np.dot(self.X, np.diag(np.sqrt(self._Wbar)))
+        U, S, Vh = sc_linalg.svd(Xtilde)
+        ytilde = np.dot(U.T, self.y)
+        _s2, _sb2, _l2, _logmarglik, _grr_iter = penalized_em.ridge_svd(ytilde,
+                                                                        np.square(S),
+                                                                        s2_init=self._s2,
+                                                                        sb2_init=self._sb2, 
+                                                                        l2_init=1.0,
+                                                                        tol=1e-4,
+                                                                        max_iter=1000)
+        self._sb2 = _sb2 * _l2 / _s2
+        self._s2 = _s2
+        return
+
+
+    '''
+    Invert a pxp matrix directly (X'X + W.inv)
+    Require: XTX, Wbar, sb2
+    '''
     def update_sigma_direct(self):
-        self._sigma = self.cho_inverse(self._XTX + np.diag(1 / self._Wbar))
+        self._sigma = self.cho_inverse(self._XTX + np.diag(1 / self._Wbar / self._sb2))
         return
 
 
+    '''
+    Invert a nxn matrix, using Woodbury identity of (X'X + W.inv)
+    Require: n_samples, X, Wbar, sb2
+    '''
     def update_sigma_woodbury(self):
-        Hinv = self.cho_inverse(np.eye(self.n_samples) + np.linalg.multi_dot([self.X, np.diag(self._Wbar), self.X.T]))
-        self._sigma = np.diag(self._Wbar) \
-                      - np.linalg.multi_dot([np.diag(self._Wbar), self.X.T, Hinv, self.X, np.diag(self._Wbar)])
+        XWXT = np.linalg.multi_dot([self.X, np.diag(self._Wbar), self.X.T])
+        Hinv = self.cho_inverse(np.eye(self.n_samples) + self._sb2 * XWXT)
+        self._sigma = np.diag(self._Wbar) * self._sb2 \
+                      - np.linalg.multi_dot([np.diag(self._Wbar), self.X.T, Hinv, self.X, np.diag(self._Wbar)]) \
+                      * np.square(self._sb2)
         return
 
 
+    '''
+    Use the already computed SVD of X to approximate X'X = L'L + D
+    and then invert the matrix. 
+    Reduces the computation cost of the diagonal elements of the inverse.
+    Require: svd(X), Dinit = diag(X'X), Wbar, sb2
+    '''
     def update_sigma_woodbury_svd(self, k = None):
         U, S, Vh = self._svd
         if k is None:
             k = max(S.shape[0], Vh.shape[0])
         L = np.dot(np.diag(S[:k]), Vh[:k, :])
         D = self._Dinit - np.sum(np.square(L), axis = 0)
-        A = D + (1 / self._Wbar)
-        Ainv = 1 / A
-        Hinv = self.cho_inverse(np.eye(self.n_samples) + np.linalg.multi_dot([L, np.diag(Ainv), L.T]))
-        self._sigma = np.diag(Ainv) - np.linalg.multi_dot([np.diag(Ainv), L.T, Hinv, L, np.diag(Ainv)])
+        A = D + (1 / self._Wbar / self._sb2)
+        Ainv = np.diag(1 / A)
+        Hinv = self.cho_inverse(np.eye(k) + np.linalg.multi_dot([L, Ainv, L.T]))
+        self._sigma = Ainv - np.linalg.multi_dot([Ainv, L.T, Hinv, L, Ainv])
         return
 
 
@@ -189,7 +234,7 @@ class EBMR:
         return
 
 
-    def grr_loglik(self):
+    def grr_logmarglik(self):
         sigma_y = self._s2 * (np.eye(self.n_samples) + self._sb2 * np.dot(self.X, np.dot(np.diag(self._Wbar), self.X.T)))
         loglik  = log_density.mgauss(self.y.reshape(-1, 1), np.zeros((self.n_samples, 1)), sigma_y)
         return loglik

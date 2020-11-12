@@ -22,3 +22,36 @@ def ridge(X, Y, s2, sb2, max_iter):
         sb2 = np.sum(np.square(mub) + np.diag(Sigmab)) / n_features
         itn += 1
     return s2, sb2, mub, Sigmab, loglik, itn
+
+
+def ridge_svd(y, d2, 
+              s2_init=1.0, sb2_init=1.0, l2_init=1.0,
+              tol=1e-4,
+              max_iter=1000):
+
+    k = y.shape[0]
+    s2 = s2_init
+    sb2 = sb2_init
+    l2 = l2_init
+
+    logmarglik = np.zeros(max_iter+1)
+    itn = 0
+    logmarglik[itn] = log_density.mgauss_diagcov(y, np.zeros(k), s2 + sb2 * l2 * d2)
+    while itn < max_iter:
+        prior_var = l2 * d2
+        data_var = s2 / sb2
+        post_var = 1 / ((1 / prior_var) + (1 / data_var))
+        post_mean = post_var * (1 / data_var) * (y / np.sqrt(sb2))
+
+        theta2 = np.square(post_mean) + post_var
+        sb2 = np.square(np.sum(y * post_mean) / np.sum(theta2))
+        l2 = np.mean(theta2 / d2)
+
+        r = y - np.sqrt(sb2) * post_mean
+        s2 = np.mean(np.square(r) + sb2 * post_var)
+
+        itn += 1
+        logmarglik[itn] = log_density.mgauss_diagcov(y, np.zeros(k), s2 + sb2 * l2 * d2)
+        if logmarglik[itn] - logmarglik[itn-1] < tol: break
+
+    return s2, sb2, l2, logmarglik[:itn+1], itn
