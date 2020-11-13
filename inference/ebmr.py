@@ -50,6 +50,7 @@ class EBMR:
         # self._XTX
         # self._Dinit # diagonal of X'X (used when approximating X'X = L'L + D)
         # self._h2  # h2 term of parametric ELBO
+        # self._logdet_sigma
 
         # If GRR is solved with EM, then we also need the SVD of XW^0.5 for each iteration
         # self._svdXW
@@ -115,6 +116,7 @@ class EBMR:
         self._XTy   = np.dot(self.X.T, self.y)
         self._Dinit = np.diag(self._XTX)
         self._h2    = 0.0
+        self._logdet_sigma = 0.0
 
         # EBMR iteration
         itn = 0
@@ -133,14 +135,11 @@ class EBMR:
                 self.grr_em_svd()
 
             # EBNV Step
+            # h2 is calculated inside this class.
             self.update_ebnv()
 
-
-
             # Calculate ELBO
-            # Why h2 is calculated inside this class?
-            # Hence, it is calculated within the scope of this class
-            self.update_h2()
+            #self.update_h2()
             self.update_elbo()
 
             # Bookkeeping
@@ -152,7 +151,7 @@ class EBMR:
             if self._elbo_path[itn] - self._elbo_path[itn-1] < self.tol: break
 
         # For debugging, calculate the final ELBO
-        _sigma = f_sigma.direct(self._XTX, self._Wbar, self._sb2)
+        _sigma, _logdet = f_sigma.direct(self._XTX, self._Wbar, self._sb2, compute_full=True)
         _mu = np.dot(_sigma, self._XTy) 
         self._elbo = f_elbo.parametric(self.X, self.y,
                         self._s2, self._sb2,
@@ -184,8 +183,8 @@ class EBMR:
             penalized_em.ridge(Xtilde, self.y, self._s2, self._sb2 * self._s2, 100)
         self._sb2 = _sb2 / _s2
         self._s2  = _s2
-        self.update_sigma_em_svd()
-        self.update_mu_em_svd()
+        self.update_sigma(use_svdXW=True)
+        self.update_mu(use_svdXW=True)
         return
 
 
@@ -206,8 +205,8 @@ class EBMR:
                                    tol=1e-4, max_iter=100)
         self._sb2 = _sb2 * _l2 / _s2
         self._s2 = _s2
-        self.update_sigma_em_svd()
-        self.update_mu_em_svd()
+        self.update_sigma(use_svdXW=True)
+        self.update_mu(use_svdXW=True)
         return
 
 
@@ -217,91 +216,91 @@ class EBMR:
     Options are:
         sigma model = full | diagonal
         inv_model   = direct | woodbury | woodbury_svd | woodbury_svd_fast 
-    I wanted to keep all sigma calculation functions separate, hence the if blocks. 
-    Ideally, they could be arguments of the function call.
-    '''
-    def update_sigma(self):
-
-        if self.sigma_model == 'full':
-            if self.inv_model == 'direct':
-                self._sigma = f_sigma.direct(self._XTX, self._Wbar, self._sb2)
-            elif self.inv_model == 'woodbury':
-                self._sigma = f_sigma.woodbury(self.X, self._Wbar, self._sb2)
-            elif self.inv_model == 'woodbury_svd':
-                self._sigma = f_sigma.woodbury_svdX(self._svdX, self._Dinit, self._Wbar, self._sb2)
-            elif self.inv_model == 'woodbury_svd_fast':
-                self._sigma = f_sigma.woodbury_svdX(self._svdX, self._Dinit, self._Wbar, self._sb2, k = self.k)
-
-        elif self.sigma_model == 'diagonal':
-            if self.inv_model == 'direct':
-                self._sigma_diag = f_sigma.direct_diag(self._XTX, self._Wbar, self._sb2)
-            elif self.inv_model == 'woodbury':
-                self._sigma_diag = f_sigma.woodbury_diag(self.X, self._Wbar, self._sb2)
-            elif self.inv_model == 'woodbury_svd':
-                self._sigma_diag = f_sigma.woodbury_svdX_diag(self._svdX, self._Dinit, self._Wbar, self._sb2)
-            elif self.inv_model == 'woodbury_svd_fast':
-                self._sigma_diag = f_sigma.woodbury_svdX_diag(self._svdX, self._Dinit, self._Wbar, self._sb2, k = self.k)
-
-        return
-
-
-    '''
+        use_svdXW   = True | False
     GRR calculation by EM methods use svd(XW^0.5),
     which can be utilized for efficient computation of sigma / sigma_diag
     Currently for the EM models, 'woodbury_svd' and 'woodbury_svd_fast are same.
-    Kept both for future development
+    Kept both for future development.
 
-    Note: Poor coding with large block of code repeated. 
-          Find a better solution.
+    Poor coding.
+    The return values are different(self._sigma and self._sigma_diag), hence the if blocks. 
+    Ideally, they could be arguments of the function call.
     '''
-    def update_sigma_em_svd(self):
+    def update_sigma(self, use_svdXW = False):
+
         if self.sigma_model == 'full':
             if self.inv_model == 'direct':
-                self._sigma = f_sigma.direct(self._XTX, self._Wbar, self._sb2)
+                self._sigma, self._logdet_sigma = \
+                    f_sigma.direct(self._XTX, self._Wbar, self._sb2, compute_full=True)
             elif self.inv_model == 'woodbury':
-                self._sigma = f_sigma.woodbury(self.X, self._Wbar, self._sb2)
-                #self._sigma = f_sigma.woodbury_svdXW(self.n_features, self._svdXW, self._Wbar, self._sb2)
+                self._sigma, self._logdet_sigma = \
+                    f_sigma.woodbury(self.X, self._Wbar, self._sb2, compute_full=True)
             elif self.inv_model == 'woodbury_svd':
-                self._sigma = f_sigma.woodbury_svdXW(self.n_features, self._svdXW, self._Wbar, self._sb2)
+                if use_svdXW:
+                    self._sigma, self._logdet_sigma = \
+                        f_sigma.woodbury_svdXW(self.n_features, self._svdXW, self._Wbar, self._sb2, compute_full=True)
+                else:
+                    self._sigma, self._logdet_sigma = \
+                        f_sigma.woodbury_svdX(self._svdX, self._Dinit, self._Wbar, self._sb2, compute_full=True)
             elif self.inv_model == 'woodbury_svd_fast':
-                self._sigma = f_sigma.woodbury_svdXW(self.n_features, self._svdXW, self._Wbar, self._sb2)
+                if use_svdXW:
+                    self._sigma, self._logdet_sigma = \
+                        f_sigma.woodbury_svdXW(self.n_features, self._svdXW, self._Wbar, self._sb2, compute_full=True)
+                else:
+                    self._sigma, self._logdet_sigma = \
+                        f_sigma.woodbury_svdX(self._svdX, self._Dinit, self._Wbar, self._sb2, k = self.k, compute_full=True)
 
         elif self.sigma_model == 'diagonal':
             if self.inv_model == 'direct':
-                self._sigma_diag = f_sigma.direct_diag(self._XTX, self._Wbar, self._sb2)
+                self._sigma_diag, self._logdet_sigma = \
+                    f_sigma.direct(self._XTX, self._Wbar, self._sb2)
             elif self.inv_model == 'woodbury':
-                self._sigma_diag = f_sigma.woodbury_diag(self.X, self._Wbar, self._sb2)
-                #self._sigma_diag = f_sigma.woodbury_svdXW_diag(self.n_features, self._svdXW, self._Wbar, self._sb2)
+                self._sigma_diag, self._logdet_sigma = \
+                    f_sigma.woodbury(self.X, self._Wbar, self._sb2)
             elif self.inv_model == 'woodbury_svd':
-                self._sigma_diag = f_sigma.woodbury_svdXW_diag(self.n_features, self._svdXW, self._Wbar, self._sb2)
+                if use_svdXW:
+                    self._sigma_diag, self._logdet_sigma = \
+                        f_sigma.woodbury_svdXW(self.n_features, self._svdXW, self._Wbar, self._sb2)
+                else:
+                    self._sigma_diag, self._logdet_sigma = \
+                        f_sigma.woodbury_svdX(self._svdX, self._Dinit, self._Wbar, self._sb2)
             elif self.inv_model == 'woodbury_svd_fast':
-                self._sigma_diag = f_sigma.woodbury_svdXW_diag(self.n_features, self._svdXW, self._Wbar, self._sb2)
-        return
+                if use_svdXW:
+                    self._sigma_diag, self._logdet_sigma = \
+                        f_sigma.woodbury_svdXW(self.n_features, self._svdXW, self._Wbar, self._sb2)
+                else:
+                    self._sigma_diag, self._logdet_sigma = \
+                        f_sigma.woodbury_svdX(self._svdX, self._Dinit, self._Wbar, self._sb2, k = self.k)
 
-
-    def update_mu(self):
-        if self.sigma_model == 'full':
-            self._mu = np.dot(self._sigma, self._XTy)
-        elif self.sigma_model == 'diagonal':
-            self._mu = np.dot(np.diag(self._sigma_diag), self._XTy)
         return
 
 
     '''
-    This does not depend on sigma_model or inv_model
+    When using svdXW, the mu does not depend on sigma_model or inv_model
     Calculated directly from svd(XW^0.5), Wbar and sb2
     '''
-    def update_mu_em_svd(self):
-        U, D, Vh = self._svdXW
-        d2 = np.square(D)
-        dt = self._sb2 * d2 / (1 + self._sb2 * d2)
-        vdtv = np.eye(self.n_features) - np.linalg.multi_dot([Vh.T, np.diag(dt), Vh])
-        Wsqrt = np.diag(np.sqrt(self._Wbar)) # convert the Wbar vector to matrix format
-        self._mu = np.linalg.multi_dot([Wsqrt, Vh.T, np.diag(dt), np.diag(1/D), U.T, self.y])
+    def update_mu(self, use_svdXW=False):
+        if use_svdXW:
+            U, D, Vh = self._svdXW
+            d2 = np.square(D)
+            dt = self._sb2 * d2 / (1 + self._sb2 * d2)
+            vdtv = np.eye(self.n_features) - np.linalg.multi_dot([Vh.T, np.diag(dt), Vh])
+            Wsqrt = np.diag(np.sqrt(self._Wbar)) # convert the Wbar vector to matrix format
+            self._mu = np.linalg.multi_dot([Wsqrt, Vh.T, np.diag(dt), np.diag(1/D), U.T, self.y])
+        else:
+            if self.sigma_model == 'full':
+                self._mu = np.dot(self._sigma, self._XTy)
+            elif self.sigma_model == 'diagonal':
+                self._mu = np.dot(np.diag(self._sigma_diag), self._XTy)
         return
 
 
+    '''
+    The correction term in h2 is required because 
+    sigma was calculated with old W.
+    '''
     def update_ebnv(self):
+        old_Wbar = self._Wbar
         if self.sigma_model == 'full':
             bj2 = np.square(self._mu) + np.diag(self._sigma) * self._s2
         elif self.sigma_model == 'diagonal':
@@ -310,42 +309,50 @@ class EBMR:
             W_point_estimate = np.sum(bj2) / self._s2 / self.n_features
             self._Wbar = np.repeat(W_point_estimate, self.n_features)
             self._KLW = 0.0
-        return
 
-
-    '''
-    Note that Wbar has changed after the last calculation of sigma.
-    Hence either sigma should be updated [for mle] <-- but it works without this update!
-    or the h2_term should be calculated again from svd(XW^0.5) [for em and em_svd]
-    '''
-    def update_h2(self):
         if self.grr_model == 'mle':
-            #self.update_sigma()
-            logdet_sigma = np.linalg.slogdet(self._sigma)[1]
-        elif self.grr_model == 'em' or self.grr_model == 'em_svd':
-            logdet_sigma = np.sum(np.log(self._sb2 * self._Wbar)) \
-                - np.sum(np.log(1 + self._sb2 * np.square(self._svdXW[1])))
-        self._h2 = - 0.5 * self.n_features + 0.5 * logdet_sigma
+            self._h2 = - 0.5 * np.trace(np.dot(self._XTX + np.diag(1 / self._Wbar / self._sb2), self._sigma)) \
+                        + 0.5 * self._logdet_sigma
+        else:
+            self._h2 = - 0.5 * self.n_features + 0.5 * self._logdet_sigma \
+                        + 0.5 * (1 / self._sb2) * np.sum(((1 / old_Wbar) - (1 / self._Wbar)) * self._sigma_diag) \
+                        - 0.5 * (np.sum(np.log(old_Wbar)) - np.sum(np.log(self._Wbar)))
+
         return
+
+
+    #'''
+    #Note that Wbar has changed after the last calculation of sigma.
+    #Hence either sigma should be updated [for mle] <-- but it works without this update!
+    #or the h2_term should be calculated again from svd(XW^0.5) [for em and em_svd]
+    #'''
+    #def update_h2(self):
+    #    logdet_sigma = self._logdet_sigma
+    #    if self.grr_model == 'em' or self.grr_model == 'em_svd':
+    #        logdet_sigma = np.sum(np.log(self._sb2 * self._Wbar)) \
+    #            - np.sum(np.log(1 + self._sb2 * np.square(self._svdXW[1])))
+    #    self._h2 = - 0.5 * self.n_features + 0.5 * logdet_sigma
+    #    return
 
 
     def update_elbo(self):
         # The sigma term is not used,
         # since we have already calculated the h2_term.
-        if self.sigma_model == 'full':
-            b_postvar = self._sigma
-        elif self.sigma_model == 'diagonal':
-            b_postvar = np.diag(self._sigma_diag)
+        #if self.sigma_model == 'full':
+        #    b_postvar = self._sigma
+        #elif self.sigma_model == 'diagonal':
+        #    b_postvar = np.diag(self._sigma_diag)
 
-        calc_h2 = True
-        if self.grr_model == 'em' or self.grr_model == 'em_svd': calc_h2 = False
+        #calc_h2 = True
+        #if self.grr_model == 'em' or self.grr_model == 'em_svd': calc_h2 = False
 
         self._elbo = f_elbo.parametric(self.X, self.y,
                         self._s2, self._sb2,
-                        self._mu, b_postvar,
+                        self._mu, self._sigma,
                         self._Wbar, self._XTX, 
                         np.log(self._Wbar), self._KLW,
-                        h2_term = self._h2, calc_h2 = calc_h2)
+                        #h2_term = self._h2, calc_h2 = calc_h2)
+                        h2_term = self._h2, calc_h2 = False)
         return
 
 

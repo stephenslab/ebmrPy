@@ -141,7 +141,8 @@ class TestRidge(unittest.TestCase):
         m1 = Ridge(solver = 'ebmr', ebmr_args = method1)
         m1.fit(X, y)
         for grr in ['em', 'em_svd']:
-            for sigma in ['full']:
+        #for grr in ['em_svd']:
+            for sigma in ['full', 'diagonal']:
                 for inverse in ['direct', 'woodbury', 'woodbury_svd']:
                     method2 = [grr, sigma, inverse]
                     m2 = Ridge(solver = 'ebmr', ebmr_args = method2)
