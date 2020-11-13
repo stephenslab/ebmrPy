@@ -39,7 +39,7 @@ and then invert the matrix.
 Reduces the computation cost of the diagonal elements of the inverse.
 Require: svd(X), Dinit = diag(X'X), Wbar, sb2
 '''
-def woodbury_svd(svdX, Dinit, Wbar, sb2, k = None):
+def woodbury_svdX(svdX, Dinit, Wbar, sb2, k = None):
     U, S, Vh = svdX
     if k is None:
         k = max(S.shape[0], Vh.shape[0])
@@ -51,5 +51,22 @@ def woodbury_svd(svdX, Dinit, Wbar, sb2, k = None):
     sigma = Ainv - np.linalg.multi_dot([Ainv, L.T, Hinv, L, Ainv])
     return sigma
 
-def woodbury_svd_diag(svdX, Dinit, Wbar, sb2, k = None):
-    return np.diag(woodbury_svd(svdX, Dinit, Wbar, sb2, k = k))
+def woodbury_svdX_diag(svdX, Dinit, Wbar, sb2, k = None):
+    return np.diag(woodbury_svdX(svdX, Dinit, Wbar, sb2, k = k))
+
+'''
+Use the already computed SVD of XW^0.5
+Reduces the computation cost of the diagonal elements of the inverse.
+Require: n_features, svd(XW^0.5), Wbar, sb2
+'''
+def woodbury_svdXW(p, svdXW, Wbar, sb2):
+    U, D, Vh = svdXW
+    d2 = np.square(D)
+    dt = sb2 * d2 / (1 + sb2 * d2)
+    vdtv = np.eye(p) - np.linalg.multi_dot([Vh.T, np.diag(dt), Vh])
+    Wsqrt_m = np.diag(np.sqrt(Wbar)) # convert the Wbar vector to matrix format
+    sigma = sb2 * np.linalg.multi_dot([Wsqrt_m, vdtv, Wsqrt_m])
+    return sigma
+
+def woodbury_svdXW_diag(p, svdXW, Wbar, sb2):
+    return np.diag(woodbury_svdXW(p, svdXW, Wbar, sb2))

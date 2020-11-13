@@ -55,7 +55,7 @@ class Ridge:
                 penalized_em.ridge(X, y, 
                                    self.s2_init, self.sb2_init, self.max_iter)
             sb2 = _sb2 / s2
-            updates = {'loglik': mll}
+            updates = {'mll_path': mll}
 
         elif self.solver == 'em_svd':
             U, D, Vh = sc_linalg.svd(X, full_matrices=False)
@@ -70,7 +70,7 @@ class Ridge:
             # Convert to model parameters
             sb2 = _l2 * _sb2 / s2
 
-            updates = {'loglik': mll}
+            updates = {'mll_path': mll}
             Xtilde = np.dot(np.diag(D), Vh)
             XTXtilde = np.dot(Xtilde.T, Xtilde)
             #XTX = np.dot(X.T, X)
@@ -96,8 +96,9 @@ class Ridge:
             bvar  = ebmr_ridge.s2 * ebmr_ridge.sigma
             s2    = ebmr_ridge.s2
             sb2   = ebmr_ridge.sb2
-            updates = {'loglik': ebmr_ridge.mll_path,
-                       'elbo': ebmr_ridge.elbo_path}
+            updates = {'mll_path': ebmr_ridge.mll_path,
+                       'elbo_path': ebmr_ridge.elbo_path,
+                       'elbo': ebmr_ridge.elbo}
             n_iter = ebmr_ridge.n_iter
 
         # Return values

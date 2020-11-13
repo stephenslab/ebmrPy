@@ -16,14 +16,14 @@ class TestRidge(unittest.TestCase):
         return Xstd
     
     
-    def _ridge_data(self, n=50, p=100, sd=1.0, seed=200):
+    def _ridge_data(self, n=50, p=100, sd=5.0, seed=100):
         np.random.seed(seed)
         X = np.random.normal(0, 1, n * p).reshape(n, p)
         X = self._standardize(X)
         btrue = np.random.normal(0, 1, p)
         y = np.dot(X, btrue) + np.random.normal(0, sd, n)
         y = y - np.mean(y)
-        y = y / np.std(y)
+        #y = y / np.std(y)
         return X, y, btrue
 
 
@@ -47,17 +47,17 @@ class TestRidge(unittest.TestCase):
 
 
     def _compare_elbo(self, m1, m2, msg=None):
-        self.assertAlmostEqual(m1.updates_['elbo'][-1],
-                               m2.updates_['elbo'][-1],
+        self.assertAlmostEqual(m1.updates_['elbo'],
+                               m2.updates_['elbo'],
                                places = 2,
                                msg = msg)
         return
 
 
-    def _check_elbo(self, m1, msg=None):
-        elbo = m1.updates_['elbo'][-1]
-        mll  = m1.updates_['loglik'][-1]
-        mlogger.debug(f"ELBO: {elbo:g}")
+    def _check_elbo(self, m1, method=['Unknown'], msg=None):
+        elbo = m1.updates_['elbo']
+        mll  = m1.updates_['mll_path'][-1]
+        mlogger.debug(f"ELBO for {method}: {elbo:g}")
         self.assertAlmostEqual(elbo, mll, places=2, msg=msg)
         return
 
@@ -67,15 +67,16 @@ class TestRidge(unittest.TestCase):
         X, y, btrue = self._ridge_data()
         m1 = Ridge(solver='em', max_iter=100)
         m2 = Ridge(solver='ebmr', tol=1e-4, max_iter=1000,
-                        ebmr_args=['None', 'full', 'direct'])
+                        ebmr_args=['mle', 'full', 'direct'])
         m1.fit(X, y)
         m2.fit(X, y)
 
-        self._check_elbo(m2, 
+        self._check_elbo(m2,
+                         method=['mle', 'full', 'direct'],
                          msg="ELBO is different from log marginal likelihood for EBMR")
 
-        self.assertAlmostEqual(m1.updates_['loglik'][-1], 
-                               m2.updates_['loglik'][-1],
+        self.assertAlmostEqual(m1.updates_['mll_path'][-1], 
+                               m2.updates_['mll_path'][-1],
                                places=2,
                                msg="Log marginal likelihood is different for EM and EBMR ridge regression")
         return
@@ -88,43 +89,45 @@ class TestRidge(unittest.TestCase):
         m2 = Ridge(solver='em_svd', max_iter=100)
         m1.fit(X, y)
         m2.fit(X, y)
-        self.assertAlmostEqual(m1.updates_['loglik'][-1],
-                               m2.updates_['loglik'][-1],
-                               places=3,
+        self.assertAlmostEqual(m1.updates_['mll_path'][-1],
+                               m2.updates_['mll_path'][-1],
+                               places=2,
                                msg="Log marginal likelihood is different for EM-Ridge and EM-Ridge-SVD")
         return
 
 
     def test_woodbury_full(self):
         mlogger.info("Compare EBMR ridge regression with and without Woodbury")
-        method1 = ['None', 'full', 'direct']
-        method2 = ['None', 'full', 'woodbury']
+        method1 = ['mle', 'full', 'direct']
+        method2 = ['mle', 'full', 'woodbury']
         m1, m2 = self._run_ebmr_methods(method1, method2)
 
         self._compare_sigma(m1, m2,
             msg="Sigma is different from direct and Woodbury")
         self._check_elbo(m2, 
+            method=method2,
             msg="ELBO is different from log marginal likelihood for EBMR ridge regression with Woodbury")
         return
 
 
     def test_woodbury_svd_full(self):
         mlogger.info("Compare EBMR ridge regression with and without SVD")
-        method1 = ['None', 'full', 'direct']
-        method2 = ['None', 'full', 'woodbury_svd']
+        method1 = ['mle', 'full', 'direct']
+        method2 = ['mle', 'full', 'woodbury_svd']
         m1, m2 = self._run_ebmr_methods(method1, method2)
 
         self._compare_sigma(m1, m2,
             msg="Sigma is different from Woodbury and Woodbury-SVD")
         self._check_elbo(m2, 
+            method=method2,
             msg="ELBO is different from log marginal likelihood for EBMR ridge regression with Woodbury-SVD")
         return
 
 
     def test_woodbury_svd_fast(self):
         mlogger.info("Compare EBMR ridge regression with and without reduced dimension (k)")
-        method1 = ['None', 'full', 'direct']
-        method2 = ['None', 'full', 'woodbury_svd']
+        method1 = ['mle', 'full', 'direct']
+        method2 = ['mle', 'full', 'woodbury_svd']
         m1, m2 = self._run_ebmr_methods(method1, method2)
         self._compare_elbo(m1, m2, 
             msg="ELBO is different for EBMR with k=n and k=n-1")
@@ -132,17 +135,22 @@ class TestRidge(unittest.TestCase):
 
 
     def test_grr(self):
-        mlogger.info("Compare EBMR ridge regression with and without EM-Ridge for GRR")
-        method1 = ['None', 'full', 'direct']
+        mlogger.info("Compare the different options of EBMR-EM-Ridge")
+        method1 = ['mle', 'full', 'direct']
+        X, y, btrue = self._ridge_data()
+        m1 = Ridge(solver = 'ebmr', ebmr_args = method1)
+        m1.fit(X, y)
         for grr in ['em', 'em_svd']:
             for sigma in ['full']:
                 for inverse in ['direct', 'woodbury', 'woodbury_svd']:
                     method2 = [grr, sigma, inverse]
-                    m1, m2 = self._run_ebmr_methods(method1, method2)
-                    self._check_elbo(m2, 
+                    m2 = Ridge(solver = 'ebmr', ebmr_args = method2)
+                    m2.fit(X, y)
+                    self._check_elbo(m2,
+                        method=method2,
                         msg = f"ELBO does not match log marginal likelihood for EBMR with [{grr}, {sigma}, {inverse}]")
                     self._compare_elbo(m1, m2,
-                        msg = f"ELBO is different for [None, full, direct]  and [{grr}, {sigma}, {inverse}]")
+                        msg = f"ELBO is different for {method1} and {method2}")
         return
 
 
