@@ -83,7 +83,7 @@ class Ridge:
  
         elif self.solver == 'ebmr':
             ebmr_ridge = EBMR(X, y, 
-                              prior = 'ridge',
+                              prior = 'point',
                               grr = self.ebmr_args[0],
                               sigma = self.ebmr_args[1],
                               inverse = self.ebmr_args[2],

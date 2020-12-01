@@ -11,7 +11,7 @@ class EBMR:
 
     def __init__(self,
                 X, y, 
-                prior='ridge',
+                prior='point', # point | dexp
                 grr='mle', # mle | em | em_svd
                 sigma='full', # full | diagonal
                 inverse='direct', # direct | woodbury | woodbury_svd | woodbury_svd_fast
@@ -40,8 +40,8 @@ class EBMR:
         self._mu         = np.zeros(self.n_features)
         self._Wbar       = np.ones(self.n_features)
         self._KLW        = 0.0
-        self._mll_path   = np.zeros(max_iter)
-        self._elbo_path  = np.zeros(max_iter)
+        self._mll_path   = np.zeros(max_iter+1)
+        self._elbo_path  = np.zeros(max_iter+1)
         self._n_iter     = 0
 
         # Other variables which will be initialized after the 'update' call
@@ -157,7 +157,7 @@ class EBMR:
                         self._s2, self._sb2,
                         self._mu, _sigma,
                         self._Wbar, self._XTX, 
-                        np.log(self._Wbar), self._KLW) 
+                        np.sum(np.log(self._Wbar)), self._KLW) 
 
         return
 
@@ -305,10 +305,36 @@ class EBMR:
             bj2 = np.square(self._mu) + np.diag(self._sigma) * self._s2
         elif self.sigma_model == 'diagonal':
             bj2 = np.square(self._mu) + self._sigma_diag * self._s2
-        if self.prior == 'ridge':
+
+        if self.prior == 'point':
             W_point_estimate = np.sum(bj2) / self._s2 / self.n_features
             self._Wbar = np.repeat(W_point_estimate, self.n_features)
             self._KLW = 0.0
+        elif self.prior == 'dexp':
+            ebnv_s2 = self._s2 * self._sb2
+            babs = np.sqrt(bj2)
+            bbar = np.mean(babs)
+            lambdainv = 2.0 * np.square(bbar) / ebnv_s2
+            self._Wbar = babs / np.sqrt(2.0 * ebnv_s2 / lambdainv)
+            ElogdetW = np.sum(np.log(self._Wbar))
+            bTWinvb = np.sum(bj2 / self._Wbar)
+            wrate = np.sqrt(2 / (ebnv_s2 * lambdainv))
+
+            '''
+            log(p(b)) // both the derivations should be equivalent
+            '''
+            logpostb = np.sum(np.log(0.5 * wrate) - wrate * babs)
+            #logpostb = 0.5 * self.n_features * np.log(0.5 / (lambdainv * ebnv_s2)) \
+            #            - np.sqrt(2 / (lambdainv * ebnv_s2)) * np.sum(babs)
+
+            '''
+            log(p(b|w)) // both the derovations should be equivalent
+            '''
+            #loglikb = - 0.5 * self.n_features * np.log(2.0 * np.pi * ebnv_s2) \
+            #            - 0.5 * ElogdetW - 0.5 * bTWinvb / ebnv_s2
+            loglikb = log_density.mgauss_diagcov(babs, np.zeros(self.n_features), ebnv_s2 * self._Wbar)
+            self._KLW = logpostb - loglikb
+
 
         if self.grr_model == 'mle':
             self._h2 = - 0.5 * np.trace(np.dot(self._XTX + np.diag(1 / self._Wbar / self._sb2), self._sigma)) \
@@ -350,7 +376,7 @@ class EBMR:
                         self._s2, self._sb2,
                         self._mu, self._sigma,
                         self._Wbar, self._XTX, 
-                        np.log(self._Wbar), self._KLW,
+                        np.sum(np.log(self._Wbar)), self._KLW,
                         #h2_term = self._h2, calc_h2 = calc_h2)
                         h2_term = self._h2, calc_h2 = False)
         return
@@ -359,7 +385,11 @@ class EBMR:
     def grr_logmarglik(self):
         sigma_y = self._s2 * (np.eye(self.n_samples) + self._sb2 * np.dot(self.X, np.dot(np.diag(self._Wbar), self.X.T)))
         loglik  = log_density.mgauss(self.y.reshape(-1, 1), np.zeros((self.n_samples, 1)), sigma_y)
-        return loglik
+        if self.prior == 'point':
+            wterm = 0.
+        elif self.prior == 'dexp':
+            wterm = self._KLW
+        return loglik + wterm
 
 
     # calcultae X'X from the SVD of X
