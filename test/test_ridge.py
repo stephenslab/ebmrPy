@@ -16,7 +16,7 @@ class TestRidge(unittest.TestCase):
         return Xstd
     
     
-    def _ridge_data(self, n=50, p=100, sd=5.0, seed=100):
+    def _ridge_data(self, n=50, p=100, sd=5.0, sb2=1.0, seed=100):
         np.random.seed(seed)
         X = np.random.normal(0, 1, n * p).reshape(n, p)
         X = self._standardize(X)
@@ -140,7 +140,7 @@ class TestRidge(unittest.TestCase):
         X, y, btrue = self._ridge_data()
         m1 = Ridge(solver = 'ebmr', ebmr_args = method1)
         m1.fit(X, y)
-        for grr in ['em', 'em_svd']:
+        for grr in ['mle', 'em', 'em_svd']:
         #for grr in ['em_svd']:
             for sigma in ['full', 'diagonal']:
                 for inverse in ['direct', 'woodbury', 'woodbury_svd']:

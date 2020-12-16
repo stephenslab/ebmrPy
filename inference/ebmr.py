@@ -11,14 +11,16 @@ class EBMR:
 
     def __init__(self,
                 X, y, 
-                prior='point', # point | dexp
+                prior='point', # point | dexp | mix_point
                 grr='mle', # mle | em | em_svd
                 sigma='full', # full | diagonal
                 inverse='direct', # direct | woodbury | woodbury_svd | woodbury_svd_fast
                 k = None, # used for woodbury_svd_fast
                 s2_init=1.0, sb2_init=1.0, 
                 max_iter=100, tol=1e-4,
-                mll_calc=True):
+                mll_calc=True,
+                ignore_convergence = False,
+                mix_point_w = None):
 
         self.X           = X
         self.y           = y
@@ -39,10 +41,18 @@ class EBMR:
         self._sigma_diag = np.zeros(self.n_features)
         self._mu         = np.zeros(self.n_features)
         self._Wbar       = np.ones(self.n_features)
+        self._Wbarinv    = np.ones(self.n_features)
         self._KLW        = 0.0
         self._mll_path   = np.zeros(max_iter+1)
         self._elbo_path  = np.zeros(max_iter+1)
         self._n_iter     = 0
+        self.ignore_convergence = ignore_convergence
+
+        # Prior specific variables
+        if self.prior == 'mix_point':
+            self._mxpnt_wk   = mix_point_w
+            ncomp = mix_point_w.shape[0]
+            self._mixcoef    = np.ones(ncomp) / ncomp
 
         # Other variables which will be initialized after the 'update' call
         # self._svdX
@@ -90,6 +100,11 @@ class EBMR:
 
 
     @property
+    def Wbarinv(self):
+        return self._Wbarinv
+
+
+    @property
     def elbo(self):
         return self._elbo
 
@@ -106,6 +121,14 @@ class EBMR:
     @property
     def n_iter(self):
         return self._n_iter
+
+
+    @property
+    def mixcoef(self):
+        if self.prior == 'mix_point':
+            return self._mixcoef
+        else:
+            return None
 
 
     def update(self):
@@ -139,7 +162,6 @@ class EBMR:
             self.update_ebnv()
 
             # Calculate ELBO
-            #self.update_h2()
             self.update_elbo()
 
             # Bookkeeping
@@ -148,11 +170,13 @@ class EBMR:
             if self.mll_calc: self._mll_path[itn] = self.grr_logmarglik()
 
             # Check convergence
-            if self._elbo_path[itn] - self._elbo_path[itn-1] < self.tol: break
+            if not self.ignore_convergence:
+                if self._elbo_path[itn] - self._elbo_path[itn-1] < self.tol: break
 
         # For debugging, calculate the final ELBO
+        #self.logger.debug(f'The final KLW term is {self._KLW:.3f}')
         _sigma, _logdet = f_sigma.direct(self._XTX, self._Wbar, self._sb2, compute_full=True)
-        _mu = np.dot(_sigma, self._XTy) 
+        _mu = np.dot(_sigma, self._XTy)
         self._elbo = f_elbo.parametric(self.X, self.y,
                         self._s2, self._sb2,
                         self._mu, _sigma,
@@ -178,13 +202,13 @@ class EBMR:
     '''
     def grr_em(self):
         Xtilde = np.dot(self.X, np.diag(np.sqrt(self._Wbar)))
-        self._svdXW = sc_linalg.svd(Xtilde, full_matrices=False)
+        #self._svdXW = sc_linalg.svd(Xtilde, full_matrices=False)
         _s2, _sb2, _bmu, _bsigma, _logmarglik, _grr_iter = \
             penalized_em.ridge(Xtilde, self.y, self._s2, self._sb2 * self._s2, 100)
         self._sb2 = _sb2 / _s2
         self._s2  = _s2
-        self.update_sigma(use_svdXW=True)
-        self.update_mu(use_svdXW=True)
+        self.update_sigma()
+        self.update_mu()
         return
 
 
@@ -249,6 +273,10 @@ class EBMR:
                 else:
                     self._sigma, self._logdet_sigma = \
                         f_sigma.woodbury_svdX(self._svdX, self._Dinit, self._Wbar, self._sb2, k = self.k, compute_full=True)
+            '''
+            We need the diagonal terms of sigma for calculating bj
+            '''
+            self._sigma_diag = np.diag(self._sigma) 
 
         elif self.sigma_model == 'diagonal':
             if self.inv_model == 'direct':
@@ -271,6 +299,10 @@ class EBMR:
                 else:
                     self._sigma_diag, self._logdet_sigma = \
                         f_sigma.woodbury_svdX(self._svdX, self._Dinit, self._Wbar, self._sb2, k = self.k)
+            '''
+            We need the full sigma for calculating h2
+            '''
+            self._sigma = np.diag(self._sigma_diag) 
 
         return
 
@@ -279,19 +311,34 @@ class EBMR:
     When using svdXW, the mu does not depend on sigma_model or inv_model
     Calculated directly from svd(XW^0.5), Wbar and sb2
     '''
+    def mu_from_svdXW(self, svdXW, y, sb2, Wbar):
+        n_features = Wbar.shape[0]
+        U, D, Vh = svdXW
+        d2 = np.square(D)
+        dt = sb2 * d2 / (1 + sb2 * d2)
+        vdtv = np.eye(n_features) - np.linalg.multi_dot([Vh.T, np.diag(dt), Vh])
+        Wsqrt = np.diag(np.sqrt(Wbar)) # convert the Wbar vector to matrix format
+        mu = np.linalg.multi_dot([Wsqrt, Vh.T, np.diag(dt), np.diag(1/D), U.T, y])
+        return mu
+
     def update_mu(self, use_svdXW=False):
         if use_svdXW:
-            U, D, Vh = self._svdXW
-            d2 = np.square(D)
-            dt = self._sb2 * d2 / (1 + self._sb2 * d2)
-            vdtv = np.eye(self.n_features) - np.linalg.multi_dot([Vh.T, np.diag(dt), Vh])
-            Wsqrt = np.diag(np.sqrt(self._Wbar)) # convert the Wbar vector to matrix format
-            self._mu = np.linalg.multi_dot([Wsqrt, Vh.T, np.diag(dt), np.diag(1/D), U.T, self.y])
+            self._mu = self.mu_from_svdXW(self._svdXW, self.y, self._sb2, self._Wbar)
         else:
             if self.sigma_model == 'full':
                 self._mu = np.dot(self._sigma, self._XTy)
             elif self.sigma_model == 'diagonal':
-                self._mu = np.dot(np.diag(self._sigma_diag), self._XTy)
+                #self._mu = np.dot(np.diag(self._sigma_diag), self._XTy)
+                '''
+                If self.sigma_model == 'diagonal',
+                then the diagonal elements of sigma 
+                gives non-optimal estimates of mu.
+                This is avoided by using svdXW
+                I have checked this extensively -- Saikat
+                '''
+                Xtilde = np.dot(self.X, np.diag(np.sqrt(self._Wbar)))
+                svdXW = sc_linalg.svd(Xtilde, full_matrices=False)
+                self._mu = self.mu_from_svdXW(svdXW, self.y, self._sb2, self._Wbar)
         return
 
 
@@ -301,14 +348,16 @@ class EBMR:
     '''
     def update_ebnv(self):
         old_Wbar = self._Wbar
-        if self.sigma_model == 'full':
-            bj2 = np.square(self._mu) + np.diag(self._sigma) * self._s2
-        elif self.sigma_model == 'diagonal':
-            bj2 = np.square(self._mu) + self._sigma_diag * self._s2
+        #if self.sigma_model == 'full':
+        #    bj2 = np.square(self._mu) + np.diag(self._sigma) * self._s2
+        #elif self.sigma_model == 'diagonal':
+        #    bj2 = np.square(self._mu) + self._sigma_diag * self._s2
+        bj2 = np.square(self._mu) + self._sigma_diag * self._s2
 
         if self.prior == 'point':
             W_point_estimate = np.sum(bj2) / self._s2 / self.n_features
             self._Wbar = np.repeat(W_point_estimate, self.n_features)
+            self._Wbarinv = 1 / self._Wbar
             self._KLW = 0.0
         elif self.prior == 'dexp':
             ebnv_s2 = self._s2 * self._sb2
@@ -316,25 +365,61 @@ class EBMR:
             bbar = np.mean(babs)
             lambdainv = 2.0 * np.square(bbar) / ebnv_s2
             self._Wbar = babs / np.sqrt(2.0 * ebnv_s2 / lambdainv)
+            self._Wbarinv = 1 / self._Wbar
             ElogdetW = np.sum(np.log(self._Wbar))
             bTWinvb = np.sum(bj2 / self._Wbar)
             wrate = np.sqrt(2 / (ebnv_s2 * lambdainv))
-
             '''
-            log(p(b)) // both the derivations should be equivalent
+            log(p(b)) // both the following approaches are same
             '''
             logpostb = np.sum(np.log(0.5 * wrate) - wrate * babs)
             #logpostb = 0.5 * self.n_features * np.log(0.5 / (lambdainv * ebnv_s2)) \
             #            - np.sqrt(2 / (lambdainv * ebnv_s2)) * np.sum(babs)
-
             '''
-            log(p(b|w)) // both the derovations should be equivalent
+            log(p(b|w)) // both the following approaches are same
             '''
             #loglikb = - 0.5 * self.n_features * np.log(2.0 * np.pi * ebnv_s2) \
             #            - 0.5 * ElogdetW - 0.5 * bTWinvb / ebnv_s2
             loglikb = log_density.mgauss_diagcov(babs, np.zeros(self.n_features), ebnv_s2 * self._Wbar)
             self._KLW = logpostb - loglikb
-
+        elif self.prior == 'mix_point':
+            ebnv_s2 = self._s2 * self._sb2
+            ncomp = self._mxpnt_wk.shape[0]
+            logCjk  = np.zeros((self.n_features, ncomp))
+            alphajk = np.zeros((self.n_features, ncomp))
+            post_mixcoef = np.zeros((self.n_features, ncomp))
+            for k in range(ncomp):
+                logCjk[:, k] = - 1 / np.sqrt(2. * np.pi * ebnv_s2 * self._mxpnt_wk[k]) \
+                               - bj2 / (2. * ebnv_s2 * self._mxpnt_wk[k])
+            '''
+            E-step to calculate the responsibilitie (new mixture coefficients)
+            '''
+            for j in range(self.n_features):
+                alphajk[j, :] = self._mixcoef * np.exp(logCjk[j, :])
+            alphajk /= np.sum(alphajk, axis = 1).reshape(-1, 1)
+            self._mixcoef = np.sum(alphajk, axis = 0) / self.n_features
+            '''
+            M-step to re-estimate the posterior expectation of W_j and 1/W_j
+            The M-step looks similar to the E-step because we are using a mixture of point mass.
+            For other distributions, it will be different.
+            '''
+            for j in range(self.n_features):
+                post_mixcoef[j, :] = self._mixcoef * np.exp(logCjk[j, :])
+            post_mixcoef /= np.sum(post_mixcoef, axis = 1).reshape(-1, 1)
+            self._Wbar    = np.sum(post_mixcoef * self._mxpnt_wk, axis = 1)
+            self._Wbarinv = np.sum(post_mixcoef / self._mxpnt_wk, axis = 1)
+            '''
+            Finally, we calculate the expaction of the KL difference term
+            '''
+            for j in range(self.n_features):
+                alphajk[j, :] = self._mixcoef * np.exp(logCjk[j, :])
+            logpostbj = np.log(np.sum(alphajk, axis=1))
+            logpostb  = np.sum(logpostbj)
+            loglikb   = 0
+            for j in range(self.n_features):
+                loglikb += np.sum(self._mixcoef * logCjk[j, :])
+            self._KLW = logpostb - loglikb
+        #self.logger.debug(f'KLW term is {self._KLW:.3f}')
 
         if self.grr_model == 'mle':
             self._h2 = - 0.5 * np.trace(np.dot(self._XTX + np.diag(1 / self._Wbar / self._sb2), self._sigma)) \
@@ -343,6 +428,9 @@ class EBMR:
             self._h2 = - 0.5 * self.n_features + 0.5 * self._logdet_sigma \
                         + 0.5 * (1 / self._sb2) * np.sum(((1 / old_Wbar) - (1 / self._Wbar)) * self._sigma_diag) \
                         - 0.5 * (np.sum(np.log(old_Wbar)) - np.sum(np.log(self._Wbar)))
+        #self._h2 = - 0.5 * self.n_features + 0.5 * self._logdet_sigma \
+        #            + 0.5 * (1 / self._sb2) * np.sum(((1 / old_Wbar) - (1 / self._Wbar)) * self._sigma_diag) \
+        #            - 0.5 * (np.sum(np.log(old_Wbar)) - np.sum(np.log(self._Wbar)))
 
         return
 
@@ -364,17 +452,17 @@ class EBMR:
     def update_elbo(self):
         # The sigma term is not used,
         # since we have already calculated the h2_term.
-        #if self.sigma_model == 'full':
-        #    b_postvar = self._sigma
-        #elif self.sigma_model == 'diagonal':
-        #    b_postvar = np.diag(self._sigma_diag)
+        if self.sigma_model == 'full':
+            b_postvar = self._sigma
+        elif self.sigma_model == 'diagonal':
+            b_postvar = np.diag(self._sigma_diag)
 
         #calc_h2 = True
         #if self.grr_model == 'em' or self.grr_model == 'em_svd': calc_h2 = False
 
         self._elbo = f_elbo.parametric(self.X, self.y,
                         self._s2, self._sb2,
-                        self._mu, self._sigma,
+                        self._mu, b_postvar,
                         self._Wbar, self._XTX, 
                         np.sum(np.log(self._Wbar)), self._KLW,
                         #h2_term = self._h2, calc_h2 = calc_h2)
@@ -385,9 +473,10 @@ class EBMR:
     def grr_logmarglik(self):
         sigma_y = self._s2 * (np.eye(self.n_samples) + self._sb2 * np.dot(self.X, np.dot(np.diag(self._Wbar), self.X.T)))
         loglik  = log_density.mgauss(self.y.reshape(-1, 1), np.zeros((self.n_samples, 1)), sigma_y)
+        #wterm = 0.
         if self.prior == 'point':
             wterm = 0.
-        elif self.prior == 'dexp':
+        else:
             wterm = self._KLW
         return loglik + wterm
 
