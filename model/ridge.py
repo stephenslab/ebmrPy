@@ -14,7 +14,7 @@ class Ridge:
     def __init__(self,
                  normalize=False,
                  s2_init=1.0, sb2_init=1.0,
-                 max_iter=1000, tol=1e-4,
+                 max_iter=5000, tol=1e-8,
                  solver='auto',
                  ebmr_args=['None', 'full', 'direct'],
                  fast_k=None):
@@ -53,7 +53,8 @@ class Ridge:
             # Obtain scaled parameters and convert to model parameters
             s2, _sb2, bmean, bvar, mll, n_iter = \
                 penalized_em.ridge(X, y, 
-                                   self.s2_init, self.sb2_init, self.max_iter)
+                                   self.s2_init, self.sb2_init, 
+                                   max_iter = self.max_iter, tol = self.tol)
             sb2 = _sb2 / s2
             updates = {'mll_path': mll}
 

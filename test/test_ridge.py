@@ -16,12 +16,12 @@ class TestRidge(unittest.TestCase):
         return Xstd
     
     
-    def _ridge_data(self, n=50, p=100, sd=5.0, sb2=1.0, seed=100):
+    def _ridge_data(self, n=50, p=100, s=10.0, sb=5.0, seed=100):
         np.random.seed(seed)
         X = np.random.normal(0, 1, n * p).reshape(n, p)
         X = self._standardize(X)
-        btrue = np.random.normal(0, 1, p)
-        y = np.dot(X, btrue) + np.random.normal(0, sd, n)
+        btrue = np.random.normal(0, sb, p)
+        y = np.dot(X, btrue) + np.random.normal(0, s, n)
         y = y - np.mean(y)
         #y = y / np.std(y)
         return X, y, btrue
@@ -65,9 +65,8 @@ class TestRidge(unittest.TestCase):
     def test_em_ebmr(self):
         mlogger.info("Check ELBO of EBMR matches logML of EM-Ridge")
         X, y, btrue = self._ridge_data()
-        m1 = Ridge(solver='em', max_iter=100)
-        m2 = Ridge(solver='ebmr', tol=1e-4, max_iter=1000,
-                        ebmr_args=['mle', 'full', 'direct'])
+        m1 = Ridge(solver='em')
+        m2 = Ridge(solver='ebmr', ebmr_args=['mle', 'full', 'direct'])
         m1.fit(X, y)
         m2.fit(X, y)
 
@@ -85,8 +84,8 @@ class TestRidge(unittest.TestCase):
     def test_em_emsvd(self):
         mlogger.info("Compare log marginal likelihood of EM-Ridge and EM-Ridge-SVD")
         X, y, btrue = self._ridge_data()
-        m1 = Ridge(solver='em', max_iter=100)
-        m2 = Ridge(solver='em_svd', max_iter=100)
+        m1 = Ridge(solver='em')
+        m2 = Ridge(solver='em_svd')
         m1.fit(X, y)
         m2.fit(X, y)
         self.assertAlmostEqual(m1.updates_['mll_path'][-1],

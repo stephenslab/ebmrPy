@@ -12,7 +12,7 @@ b ~ N(0, sb2)
 using EM algorithm.
 '''
 def ridge(X, Y, s2, sb2, 
-        max_iter=100, tol=1e-4):
+        max_iter=100, tol=1e-4, ignore_convergence=False):
 
     XTX = np.dot(X.T, X)
     XXT = np.dot(X, X.T)
@@ -38,7 +38,8 @@ def ridge(X, Y, s2, sb2,
         SigmaY = sb2 * XXT + np.eye(n_samples) * s2
         loglik[itn] = log_density.mgauss(Y.reshape(-1, 1), np.zeros((n_samples, 1)), SigmaY)
 
-        if loglik[itn] - loglik[itn-1] < tol: break
+        if not ignore_convergence:
+            if loglik[itn] - loglik[itn-1] < tol: break
 
     return s2, sb2, mub, Sigmab, loglik[:itn+1], itn
 
