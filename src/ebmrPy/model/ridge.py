@@ -4,10 +4,11 @@ Ridge regression
 
 import numpy as np
 from scipy import linalg as sc_linalg
-from inference.ebmr import EBMR
-from inference import penalized_em
-from inference import f_sigma
-from utils.logs import MyLogger
+
+from ..inference.ebmr import EBMR
+from ..inference import penalized_em
+from ..inference import f_sigma
+from ..utils.logs import MyLogger
 
 class Ridge:
 

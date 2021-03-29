@@ -3,8 +3,10 @@
 import unittest
 import numpy as np
 
-from model.ridge import Ridge
-from utils.logs import MyLogger
+import ebmrPy
+
+from ebmrPy.model.ridge import Ridge
+from ebmrPy.utils.logs import MyLogger
 
 mlogger = MyLogger(__name__)
 

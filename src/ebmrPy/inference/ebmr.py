@@ -1,11 +1,11 @@
 import numpy as np
 from scipy import linalg as sc_linalg
 
-from inference import f_sigma
-from inference import f_elbo
-from inference import penalized_em
-from utils import log_density
-from utils.logs import MyLogger
+from . import f_sigma
+from . import f_elbo
+from . import penalized_em
+from ..utils import log_density
+from ..utils.logs import MyLogger
 
 class EBMR:
 
@@ -20,7 +20,8 @@ class EBMR:
                 max_iter=100, tol=1e-4,
                 mll_calc=True,
                 ignore_convergence = False,
-                mix_point_w = None):
+                mix_point_w = None, 
+                mixcoef_init = None):
 
         self.X           = X
         self.y           = y
@@ -52,7 +53,11 @@ class EBMR:
         if self.prior == 'mix_point':
             self._mxpnt_wk   = mix_point_w
             ncomp = mix_point_w.shape[0]
-            self._mixcoef    = np.ones(ncomp) / ncomp
+            self._mixcoef = mixcoef_init
+            if self._mixcoef is None: 
+                self._mixcoef    = np.ones(ncomp) / ncomp
+                #self._mixcoef = np.zeros(ncomp)
+                #self._mixcoef[-1] = 1.0
 
         # Other variables which will be initialized after the 'update' call
         # self._svdX
@@ -161,6 +166,9 @@ class EBMR:
             # h2 is calculated inside this class.
             self.update_ebnv()
 
+            #ElogdetW = np.sum(np.log(self._Wbar))
+            #print (f"Wbar[0]: {self._Wbar[0]:.4f} E[log(|W|]: {ElogdetW:.4f}")
+
             # Calculate ELBO
             self.update_elbo()
 
@@ -204,7 +212,8 @@ class EBMR:
         Xtilde = np.dot(self.X, np.diag(np.sqrt(self._Wbar)))
         #self._svdXW = sc_linalg.svd(Xtilde, full_matrices=False)
         _s2, _sb2, _bmu, _bsigma, _logmarglik, _grr_iter = \
-            penalized_em.ridge(Xtilde, self.y, self._s2, self._sb2 * self._s2, 100)
+            penalized_em.ridge(Xtilde, self.y, self._s2, self._sb2 * self._s2, 
+                              max_iter=1000, tol=1e-8)
         self._sb2 = _sb2 / _s2
         self._s2  = _s2
         self.update_sigma()
@@ -226,7 +235,7 @@ class EBMR:
                                    s2_init=self._s2,
                                    sb2_init=self._sb2 * self._s2 / l2_init,
                                    l2_init=l2_init,
-                                   tol=1e-4, max_iter=100)
+                                   tol=1e-8, max_iter=1000)
         self._sb2 = _sb2 * _l2 / _s2
         self._s2 = _s2
         self.update_sigma(use_svdXW=True)
@@ -396,8 +405,9 @@ class EBMR:
             '''
             for j in range(self.n_features):
                 alphajk[j, :] = self._mixcoef * np.exp(logCjk[j, :])
+            #print(np.sum(alphajk, axis = 1))
             alphajk /= np.sum(alphajk, axis = 1).reshape(-1, 1)
-            self._mixcoef = np.sum(alphajk, axis = 0) / self.n_features
+            #self._mixcoef = np.sum(alphajk, axis = 0) / self.n_features
             '''
             M-step to re-estimate the posterior expectation of W_j and 1/W_j
             The M-step looks similar to the E-step because we are using a mixture of point mass.
@@ -406,7 +416,9 @@ class EBMR:
             for j in range(self.n_features):
                 post_mixcoef[j, :] = self._mixcoef * np.exp(logCjk[j, :])
             post_mixcoef /= np.sum(post_mixcoef, axis = 1).reshape(-1, 1)
+            #post_mixcoef  = alphajk.copy()
             self._Wbar    = np.sum(post_mixcoef * self._mxpnt_wk, axis = 1)
+            #self._Wbarinv = 1 / self._Wbar
             self._Wbarinv = np.sum(post_mixcoef / self._mxpnt_wk, axis = 1)
             '''
             Finally, we calculate the expaction of the KL difference term
@@ -418,7 +430,7 @@ class EBMR:
             loglikb   = 0
             for j in range(self.n_features):
                 loglikb += np.sum(self._mixcoef * logCjk[j, :])
-            self._KLW = logpostb - loglikb
+            #self._KLW = logpostb - loglikb
         #self.logger.debug(f'KLW term is {self._KLW:.3f}')
 
         if self.grr_model == 'mle':
@@ -466,7 +478,7 @@ class EBMR:
                         self._Wbar, self._XTX, 
                         np.sum(np.log(self._Wbar)), self._KLW,
                         #h2_term = self._h2, calc_h2 = calc_h2)
-                        h2_term = self._h2, calc_h2 = False)
+                        h2_term = self._h2, calc_h2 = True)
         return
 
 

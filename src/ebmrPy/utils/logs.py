@@ -2,7 +2,8 @@
 
 import logging
 import sys
-from utils import project
+
+from . import project
 
 loggers = {}
 

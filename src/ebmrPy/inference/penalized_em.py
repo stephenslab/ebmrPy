@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import linalg as sc_linalg
-from utils import log_density
 
+from ..utils import log_density
 
 '''
 Adapted from M. Stephens (https://stephens999.github.io/misc/ridge_em.html)
