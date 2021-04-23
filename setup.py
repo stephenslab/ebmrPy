@@ -38,7 +38,7 @@ setuptools.setup(
     ],
     package_dir      = {"": "src"},
     packages         = ["ebmrPy"],
-    python_requires  = ">=3.9",
+    python_requires  = ">=3.8",
     install_requires = [
         "numpy>=1.19.4",
     ],
